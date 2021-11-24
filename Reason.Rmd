@@ -1,0 +1,680 @@
+---
+title: "Modeling Probabilistic Forecasting Based on Information Learned from People Who Make Mistakes, Communicate Ineffectively, and Lie"
+author: Greg Tozzi
+date: December 16, 2016
+runtime: shiny
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    fig_width: 3
+    css: 'css/tozzi.css'
+bibliography: forecasting.bibtex
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(rbokeh)
+library(DiagrammeR)
+source('./helper_functions.R')
+```
+
+##Introduction and background
+This paper explores the challenge of turning sparse evidence learned from noisy and potentially dishonest human sources into probabilistic forecasts. The interest in undertaking this line of research stems from three propositions.
+
+###Proposition 1: The dream of forecasting events is becoming a reality
+Forecasting has been viewed as an ill-fated attempt to grapple with uncertainty [@danzig2011driving] and as a necessary condition for rationality [@de1985forecasting]. The recent well-publicized work of Bruce Bueno de Mesquita [@de2010predictioneer], Nate Silver [@silver2012signal], and Philip Tetlock [@tetlock2016superforecasting] suggest that the idea that forecasting can be conducted in an accurate and repeatable manner is gaining traction, even among some former skeptics [@tetlock2005expert].
+
+###Proposition 2: Probabilistic forecasting brings individuals and organizations unique value
+The output of a forecast can take several forms. Bruce Bueno de Mesquita’s expected utility model outputs a point forecast of a political outcome along a linear continuum [@de1985forecasting]. Extensions to this model provide multivariate point political forecasts [@shih2016analyzing]. The literature suggests that point forecasts may be inherently inferior to probabilistic forecasts.
+
+Probabilistic scenario forecasting has applications across a wide variety of domains including finance [@wright2008bayesian], meteorology [@murphy1988impact], medicine [@rajakovich2009prediction], and geopolitics [@friedman2015value]. This is not to say that probabilistic forecasting is in the norm across all domains. A study of declassified national intelligence estimates (NIE) produced by the United States intelligence community suggests that probabilities, if estimated, do not regularly make their way to policy makers [@friedman2012assessing]. However, the benefits of probabilistic forecasting are manifold and well-documented. In particular:
+	
+1. Probabilistic forecasts can be scored in a granular manner, a process that provides measurable insight into the skill of the forecaster or forecasting algorithm [@brocker2007scoring].
+
+2. Probabilistic forecasts provide direct, concise inputs into strategy and risk mitigation models and can be aggregated easily with one another [@brown1970probabilistic].
+
+3. Probabilistic forecasts provide an attractive counter to the worst aspects of punditry [@smith2013pundits].
+
+###Proposition 3: Forecasting based on evidence learned from people is difficult but important
+Developing a probabilistic forecast, even one built largely from open data sources, is not trivial. Take, for instance, FiveThirtyEight’s 2016 election forecasting model. The model incorporated data from 42 polls to develop a forecast of the general election results for Oklahoma alone [@fivethirtyeightok2016]; the total number of polls used as inputs to the model likely exceeded 2,000. Despite drawing from rich data, the model only assigned a 10.5% probability to the result that occurred: Hillary Clinton winning the popular vote but losing the Electoral College. The 2016 FiveThirtyEight model was a prolific forecaster with new forecasts generated each time a poll was incorporated.
+
+While there are certainly important domains that generate rich evidence streams from which forecasts can be constructed, other domains tend to produce sparse forecasts [@satopaa2014probability]. One could surmise that certain domains may be inherently data-sparse or that entities that are the targets of forecasters could employ purposeful obfuscation or other techniques to confound the forecasting process [@dahl2013intelligence]. Sparse forecasts also suffer from the relative inability to average out noise associated with learning and communicating evidence [@frey1998revolution].
+
+An interesting subset of sparse forecasts are those built from evidence learned from people. Incorporating evidence that is collected at great difficulty from noisy or dishonest sources approaches the problems faced by the fields of law enforcement, intelligence, competitive strategy, and journalism. We cannot discount the utility of this method of collecting information. The Watergate revelation [@woodward2005mark] and the capture of Saddam Hussein [@schaarsmith_2015] are two events that hinged on evidence learned from individual sources with questionable motivations. There is, therefore, a clear imperative to consider the unique challenges associated with turning evidence learned from noisy and potentially dishonest human sources into probabilistic forecasts.
+
+###Research questions
+This paper deals with two related research questions. The first is whether the key drivers of successful probabilistic forecasting from sparse, potentially dishonest, and noisy sources can be demonstrated through modeling. The second is whether modeling can provide insight into means of mitigating the impacts of human-induced error -- both purposeful and incidental -- on forecasts. The paper focuses on those domains in which such error cannot be attenuated through the addition of evidence collected from rich and open data sources.
+
+The proposed model is an abstraction of the process of acquiring and analyzing sparse event data to construct probabilistic forecasts of the outcomes of binary scenarios similar to those considered in the Intelligence Advanced Research Project Agency’s (IARPA) Aggregative Contingent Estimation (ACE) forecasting tournament [@campbell2014ve]. As a first step, this paper describes the implementation of a sub-model of the stochastic process that generates hidden evidence germane to forecasting the probability that a binary scenario will occur after Satopää et al. [-@satopaa2014probability]. As an aside, the paper compares this model to implied marginal information from prediction market data. Attention then turns to developing an information acquisition model that allows for information asymmetry, noisy information transfer, and a degree of purposeful obfuscation. Modeling the aggregation of evidence into a binary prediction follows Bayesian methods that evidently either are or were in use by the Central Intelligence Agency [@CIAbayesian]. Model development concludes with the implementation of a simplified method of aggregating learned evidence after Ungar et al. [-@ungar2012good].
+
+A discussion of appropriate measures of a forecasting system follows with treatments of the Brier score [@brier1950verification], root mean squared error, and response operator curves (ROC) [@fawcett2006introduction]. Parameters sweeps against synthetic data and data culled from political prediction markets demonstrate areas of sensitivity and transitional regions.
+
+##Modeling binary scenarios
+
+Building a model of scenario forecasting demands data against which the forecasts can be computed and tested. To keep this problem tractable, the model considers only binary scenarios. This simplification is made with the full understanding that there are instances in which scenarios with more than two outcomes are of interest [@fivethirtyeightMullin]. The outcome of a scenario, therefore, is that it occurs or fails to occur. The use of the term *scenario* in this context follows from a declassified publication on the use of Bayesian forecasting techniques written at the CIA [-@CIAbayesian]. The use of this term should not create confusion between the type of forecasting that this paper explores and *scenario forecasting*, a judgmental forecasting technique that uses expert opinion to develop plausible scenarios against which an organization may plan [@hyndman2014forecasting].
+
+###Building synthetic scenarios
+This method of generating synthetic data is similar to that presented in Satopää et al. 2014. For modeling purposes, scenarios are disaggregated into a series of items of evidence, each of which provides information useful for forecasting the outcome of the scenario.  The model for the underlying hidden process that defines the true probability that a scenario will occur maps Brownian motion on $\mathbb{R}$ to $[0,1]$ through the sigmoid function.  The standard Brownian motion of the log-odds is computed as
+
+1. $Y_t=Y_{t-1}+\epsilon_t$
+
+where $Y_t$ is the log-odds of the scenario at time $t$ and $\epsilon_t~N\left(0,\sigma\right)$ is Gaussian noise with standard deviation $\sigma$. In this sense, $\epsilon$ represents marginal information or evidence contained in events that occur during time step $t$ that is added to the preceding true log-odds in order to evolve the probability that the scenario will occur. Taking $Y$ as the vector of log-odds, these can be converted to scenario probabilities through
+
+2. $P_t=sigmoid\left(Y_t\right)$
+
+And the vector of odds, $O$, can be computed element-wise by mapping the log-odds to $[0,\infty]$ by
+
+3. $O_t=e^{Y_t}$
+
+The model must keep track of the evidence that is added to the system during each time step, as learning of these will form the basis of the forecasting model developed below. The simulation of synthetic data can also output a vector $L$ that captures the marginal likelihood ratio of the evidence that occurs during time $t$. For the purposes of this model, items of evidence are considered to represent the marginal information contained in the hidden process for a discrete time step. These items are characterized by a likelihood ratio. The likelihood ratio for a discrete time step, $L_t$, is the ratio of the probability that the evidence would have existed if the scenario were eventually to occur versus the probability that the evidence would have existed were the scenario eventually not to occur. These ratios are computed by mapping $\epsilon$ to the interval $[0,\infty]$ through
+
+4. $L_t=e^{\epsilon_t}$
+
+###Implementation
+The above algorithm for generating synthetic data is implemented in R as the function `synthetic_data`.
+
+	synthetic_data <- function(n, sigma)
+
+Where `n` is the number of steps to simulate and `sigma` is the standard deviation of the Gaussian noise used to generate the log-odds random walk.  The function outputs a data frame of five columns:
+
+Column        | Interpretation
+------------- | -------------
+`$P`          | Evolution of scenario probabilities
+`$Y`          | Evolution of log-odds
+`$O`          | Evolution of odds
+`$L`          | Discrete marginal likelihood ratios
+`$ε`          | Discrete marginal log-odds
+
+The behavior of scenarios generated using `synthetic_data` can be explored using the widget below.  A single simulation is conducted using the slider input each time the input values are changed.
+
+```{r synthetic, echo=FALSE}
+# Create the input sliders and action button
+inputPanel(
+  sliderInput("n_synthetic", label = "n",
+              min = 5, max = 100, value = 30, step = 1),
+  sliderInput("s_synthetic", label = "σ",
+              min = 0, max = 1, value = 0.2, step = 0.01)
+)
+
+# Run the simulation when the action button is pressed
+syntheticSim <- reactive({
+    synthetic_data(input$n_synthetic, input$s_synthetic)
+  })
+
+renderRbokeh ({figure(width = 300, height = 200) %>%
+  ly_lines(P, data = syntheticSim(), col = '#FF9500',
+           width = 2) %>%
+    x_axis(label = 'Time step') %>%
+    y_axis(label = 'Scenario probability') %>%
+    y_range(c(0, 1)) %>%
+    x_range(c(0, input$n_synthetic))})
+```
+
+###Comparison to empirical data
+
+How does the assumption that scenario probabilities evolve as a result of Gaussian noise hold up against evidence? Binary prediction marked data are available to assist in this evaluation. The Iowa Electronic Markets (IEM) are a set of prediction markets run by the University of Iowa to forecast elections [@servan2004prediction]. Under the efficient market hypothesis, market prices reflect all available information and thus serve as true representations of the value of the object or security being traded [@basu1977investment]. Analyses of past results demonstrate the IEM’s ability to outperform polling as a predictor of election outcomes [@wolfers2004prediction]. As the IEM capture the evolution of predictions for what are generally binary events, we would like to see data consistent with a log-odds random walk.
+
+Consider the winner-take-all market for the 2012 presidential election. Participants could buy either a contract that paid 1 USD if the Republican candidate won the majority of the popular vote or a contract that paid 1 USD if the Democratic candidate won the majority of the vote [@IEM]. Other candidates were not directly considered. Prices of these instruments, therefore, served as estimates of Republican or Democratic popular majorities. The evolution of these two instruments from the time that both parties had put forward their nominees to Election Day are presented in the figure below.
+
+```{r election_2012, echo=FALSE}
+# Load the data.  The data were copied from the IEM website as there's
+# no download facility and I didn't feel like builidng a scraper.  All
+# of the data in the file are directly available on the site.
+PRES12_WTA <- read.csv('data/PRES12_WTA.csv',
+                       stringsAsFactors = FALSE)
+
+# Convert date strings to dates
+PRES12_WTA$Date <- as.Date(PRES12_WTA$Date, format = '%m/%d/%y')
+
+# Convert contract names to candidates and split into separate dataframes
+PRES12_WTA$Contract[PRES12_WTA$Contract == '    DEM12_WTA'] <- 'Obama'
+PRES12_WTA$Contract[PRES12_WTA$Contract == '    REP12_WTA'] <- 'Romney'
+PRESSplit <- split(PRES12_WTA, PRES12_WTA$Contract)
+p1 <- figure(width = 600, height = 400) %>%
+  ly_lines(Date, LastPrice, data = PRESSplit$Obama, color = '#007AFF',
+           width = 2, legend = 'Obama') %>%
+  ly_lines(Date, LastPrice, data = PRESSplit$Romney, color = '#FF3B30',
+           width = 2, legend = 'Romney') %>%
+  y_range(c(0, 1)) %>%
+  y_axis(label = 'Probability of winning')
+p1
+```
+
+Referring to Equation 2, we can convert scenario probabilities to log-odds by applying the logit function
+
+5. $Y_t=logit\left(P_t\right)$
+
+With the $Y$ vector in hand, the $\epsilon$ vector is computed by applying successive differences.
+
+6. $\epsilon_t=Y_t-Y_{t-1}$
+
+Equations 5 and 6 are implemented as the function `p_to_epsilon` in R. This function returns a vector of marginal log-odds given a vector of probabilities.  Applying this function to President Obama’s IEM probabilities in 2012 produces the following histogram.
+
+```{r election_2012_hist, echo=FALSE}
+# Compute the epsilon data from the Obama data
+epsilonObama <- p_to_epsilon(PRESSplit$Obama$LastPrice)
+
+# Create the histogram
+h <- figure(width = 600, height = 400) %>%
+  ly_hist(epsilonObama, breaks = 20, freq = FALSE, col = '#007AFF') %>%
+  ly_density(epsilonObama) %>%
+  x_axis(label = 'Marginal log-odds')
+h
+```
+
+The $\epsilon$ vector is -- by inspection -- not normally distributed.  Interestingly, the large outliers occur in the final week of the campaign.  Removing these and performing a Shapiro-Wilk test [@shaphiro1965analysis] on the remaining data results in our failing to reject the null hypothesis of normality at $\alpha=0.1$.  So, while the bulk of the data fit the proposed Gaussian model, the model is not able to generate the large outliers observed in the 2012 IEM presidential winner-take-all market data.
+
+Will data from another presidential election forecasting model similarly raise doubts as the validity of the Brownian motion model that is the foundation of our analysis? We consider data from FiveThirtyEight’s model of the 2016 presidential election [@fivethirtyeight2016]. The site’s predictions were parsed from its source code using the R script `fivethirtyeight_parseR.R`. The resulting daily win probabilities for Secretary Clinton and Mr. Trump are presented in the graph below.
+
+```{r election_2016, echo=FALSE}
+# Load the data.
+load('./data/fivethirtyeight_2016.Rdata')
+
+# Plot Clinton and Trump.
+p2 <- figure(width = 600, height = 400) %>%
+  ly_lines(Date, Clinton, data = outputDF, color = '#007AFF',
+           width = 2, legend = 'Clinton') %>%
+  ly_lines(Date, Trump, data = outputDF, color = '#FF3B30',
+           width = 2, legend = 'Trump') %>%
+  y_range(c(0, 1)) %>%
+  y_axis(label = 'Probability of winning')
+p2
+```
+
+Applying the `p_to_epsilon` function to Mr. Trump’s probabilities results in the following histogram of marginal log-odds.
+
+```{r election_2016_hist, echo=FALSE}
+# Compute the epsilon data from the Obama data
+epsilonTrump <- p_to_epsilon(outputDF$Trump)
+
+# Create the histogram
+h <- figure(width = 600, height = 400) %>%
+  ly_hist(epsilonTrump, breaks = 20, freq = FALSE, col = '#FF3B30') %>%
+  ly_density(epsilonTrump) %>%
+  x_axis(label = 'Marginal log-odds')
+h
+```
+
+Again, empirical data imply that the underlying marginal log-odds of true scenarios may not be normally distributed. Whether this is a result of imperfect modeling on the part of IEM and FiveThirtyEight, model or market sensitivity to particularly interesting evidence, or some other factor will be left to future study. Regardless, we arrive at the best-case unsatisfying conclusion that the log-odds associated with evidence tied to a real scenario may -- under certain circumstances -- be modeled as Gaussian noise.  For the time being, we will continue using a Gaussian distribution to generate marginal log-odds.  We do so, however, aware that there is ample research to suggest that using the wrong distribution can lead to unfortunate errors in modeling [@taleb2004unfortunate].
+
+##Modeling information acquisition
+
+Consider an enterprise, the purpose of which is to forecast the outcome of binary events. This enterprise could be, for example, a newspaper, think tank, or business intelligence firm. Assume that the enterprise’s process falls into three broad steps. First, a source on whom the enterprise will rely must learn of an item of evidence. This learning may be noisy, which is to say that the source may not possess a strictly accurate representation of the evidence. The enterprise must then acquire the evidence from the source. This process involves communication between the source and the enterprise’s acquisition layer and is likely also noisy, as successful communication of information depends on a number of dimensions [@giffin1967contribution].  The enterprise must then analyze the item of evidence in the context of previously received items related to the same scenario.  This can the transfer of information from the enterprise’s acquisition layer to an analysis layer [@johnson2007handbook]; this transfer can also involve noise.
+
+Our highly simplified model of how evidence feeds a forecast is presented in the figure below. The generation of evidence is modeled using the formulation described above. The paper now turns to the task of acquiring the evidence through intermediaries -- referred to here as sources -- and the communication and analysis of that evidence.
+
+```{r system, echo=FALSE}
+# Generate the figure describing the process for evidence occurance to the generation of a forecast.
+
+# Create the NDF
+nodes <-
+  create_nodes(
+    nodes = c("Evidence", "Source", "Acquistion",
+              "Analysis", "Forecast")
+    )
+
+# Create the EDF
+edges <-
+  create_edges(
+    from = c("Evidence", "Source", "Acquistion", "Analysis"),
+    to = c("Source", "Acquistion", "Analysis", "Forecast"),
+    rel = "leading_to")
+
+# Create the graph
+graph <-
+  create_graph(
+    nodes_df = nodes,
+    edges_df = edges,
+    graph_attrs = "layout = dot",
+    edge_attrs = "color = gray20")
+
+# View the graph
+render_graph(graph)
+```
+
+###Taxonomy
+The proposed model is a hybrid. From discrete event simulation, the model borrows the concepts of fixed time steps. While the model does treat the flow of information between nodes representing actors, it diverges from discrete event simulations in that it does not implement queues [@beaverstock2011applied]. The model implements some nonlinear interaction between actors and, therefore, incorporates a key characteristic of agent based modeling. The bulk of the model, however, is most similar to microsimulation in that the actors’ behaviors are controlled by probability distributions.
+
+###Noisy acquisition and communication of information
+
+In our model, sources learn evidence.  Sources communicate their understanding of the evidence to an enterprise’s acquisition layer.  The acquisition layer -- which could be a discrete set of individuals or an algorithm -- communicates its understanding of the evidence to the analysis layer.  The multi-step learning and communication process could be thought of as being analogous to the children’s *telephone game* in which participants try to communicate a common message sequentially.  Their efforts typically fail due to mutations in individual words that make up the message [@dooley2003modeling].
+
+Rather than modeling the evolution of the text of an item of evidence, we consider an abstraction of the learning and communication process in which the evidence is nothing more than its marginal log-odds. As an example, consider the case of an organization trying to forecast the 2016 United States presidential election. The specific item of evidence, *FBI Director Comey stated in a letter to Congress that emails on a computer belonging to disgraced former Congressman Anthony Weiner may be relevant to the investigation into former Secretary of State Clinton’s handling of classified information* can be distilled into a single marginal likelihood ratio that describes the impact of the information on the probability that Secretary Clinton will win the election. Learned and communicated correctly, this information should contribute positively to the enterprise’s forecast.
+
+To make this problem tractable, we consider a model of acquisition and communication that involves the addition of Gaussian noise that is a function of the channel between nodes in the system diagram. This follows a form similar to Equation 1:
+
+7. $Y_{t}^{b}=Y_{t}^{a}+\xi^{ab}$
+
+So, the marginal log-odds at time $t$ as understood by actor $b$ is equal to the marginal log-odds at time $t$ as understood by actor $a$ plus temporally-invariant noise applied to any communication between $a$ and $b$. This model involves the strong assumptions that noise in a channel is stationary and that it does not vary with by issue. In the absence of evidence to the contrary, we assume that $\xi^{ab}$ is independent and identically Gaussian distributed with mean $\mu^{ab}$ and standard deviation $\sigma^{ab}$.
+
+###Accounting for information asymmetry
+
+Perfect information symmetry is unlikely.  Moreover, it is likely that for a set of interesting forecasting exercises, a substantial portion of relevant evidence may be hidden purposefully from the forecasting enterprise in order to confound analysis. Purposeful obfuscation may be employed by banks using employing asset securitization [@cheng2008banks], firms when reporting earnings [@bhattacharya2003world], and in the context of political science [@miller2005political].
+
+Perhaps the simplest way to model information asymmetry is to enforce some form of probabilistic sampling in the transfer of evidence between entities. In this sense, we suppose that actor $a$ learns of events with probability $\pi_a$. In order to keep this study appropriately tractable, only uniform sampling will be considered.
+
+###Implementation
+
+The process of learning an item of evidence and transferring that knowledge to the analytic layer with allowances for noise and bias is implemented as the R function `learn_and_transfer`.
+
+	learn_and_transfer <- function(data, π, sμ, sσ, cσ, rμ, rσ)
+	
+Where `data` is a data frame of the same format that `synthetic_data` generates, `π` is the probability with which a source learns the marginal information at a given time step, `sμ` is the mean of the noise applied to the source’s learning -- this value is included to allow for source bias, `sσ` is the standard deviation of the noise applied to the source’s learning, `cσ` is the standard deviation of the noise applied to the transfer of information from source to acquirer, `rμ` is the mean of the noise applied to the reporting from the acquirer to the analysis layer, and `rσ` is the standard deviation of the noise applied to the reporting from the acquirer to the analysis layer.  The output of `learn_and_transfer` is a -- potentially sparse depending on the value of `π` -- vector of log-odds that represents the information that reaches the acquisition layer after asymmetry and noise are accounted for.
+
+The output of `learn_and_transfer` is demonstrated in the interactive chart below.  Points in <span style="font-weight: bold
+; color: #FF9500">orange</span> represent the marginal log-odds generated by the hidden process.  Points in <span style="font-weight: bold
+; color: #5856D6">purple</span> represent the marginal log-odds presented to the analytic layer.
+
+```{r learning_evidence, echo=FALSE}
+# Create the input sliders
+inputPanel(
+  sliderInput("n", label = "Time steps",
+              min = 1, max = 100, value = 30, step = 1),
+  sliderInput("σ", label = "σ",
+              min = 0, max = 1, value = 0.1, step = 0.01),
+  sliderInput("π", label = "π",
+              min = 0.01, max = 1, value = 0.5, step = 0.01),
+  sliderInput("sμ", label = "sμ",
+              min = -1, max = 1, value = 0, step = 0.01),
+  sliderInput("sσ", label = "sσ",
+              min = 0, max = 1, value = 0, step = 0.01),
+  sliderInput("cσ", label = "cσ",
+              min = 0, max = 1, value = 0, step = 0.01),
+  sliderInput("rμ", label = "rμ",
+              min = -1, max = 1, value = 0, step = 0.01),
+  sliderInput("rσ", label = "rσ",
+              min = 0, max = 1, value = 0, step = 0.01)
+)
+
+# Generate synthetic data
+syntheticData2 <- reactive({
+    synthetic_data(n = input$n, sigma = input$σ)
+  })
+
+# Conduct evidence learning and transfer
+learnedData <- reactive({
+    learn_and_transfer(dataDF = syntheticData2(), input$π,
+                       input$sμ, input$sσ,
+                       input$cσ, input$rμ,
+                       input$rσ
+    )
+  })
+
+renderRbokeh ({figure(width = 300, height = 100) %>%
+  ly_points(ε, data = syntheticData2(), col = '#FF9500') %>%
+    x_axis(label = 'Time step') %>%
+    y_axis(label = 'Marginal log-odds') %>%
+    ly_points(learnedData(), col = '#5856D6', size = 5) %>%
+    y_range(c(-2, 2))
+  })
+
+```
+
+##Modeling analysis
+
+Once the evidence for a scenario is sampled, learned, and communicated, the enterprise’s analysis layer is presented with a vector -- or series of vectors in the case of multiple sources providing information on the same scenario -- of marginal log-odds, $\hat{Y}$, with which to build a binary forecast. Bayesian methods have been applied to similar problems in the political [@linzer2013dynamic] and geopolitical spheres [@CIAbayesian]. Following the CIA’s manual on the subject, a Bayesian forecast of the odds of a binary event occurring is simply the product of the marginal odds. Since we have in $\hat{Y}$ a vector of $n$ marginal log-odds, it is more computationally convenient to sum these in log-odds space and then to map the result to probability space using
+
+8. $\hat{P}=sigmoid\left(\sum\limits_{i=1}^{n}\hat{Y}_i\right)$
+
+The output of Equation 8 is a vector giving probabilistic forecasts of a binary scenario at discrete steps.
+
+The use of a Bayesian model should not be understood as implying that Bayesian methods are in regular use. In fact, evidence suggests that people do not implicitly employ Bayesian techniques [@loveday2015diagnostic].
+
+###Implementation
+
+The process of generating Bayesian forecasts from a consolidated vector of evidence presented as marginal log-odds is implemented in R as the function `generate_forecast`.
+
+  generate_forecast <- function(log_odds)
+	
+The output of `generate_forecast` is a vector of the evolution of the estimate of a scenario’s probability. The output of `generate_forecast` can be examined in the interactive chart that follows. The <span style="font-weight: bold
+; color: #FF9500">orange</span> line represents the true probability of the scenario based on the evolution of the hidden process as described in previous sections. Points in <span style="font-weight: bold
+; color: #5856D6">purple</span> represent the analytic layer’s forecast of the scenario probability based on information provided from a single source via a single information acquisition node. The input mechanisms are the same as previously described for the interactive chart in the modeling information acquisition section. As a simplifying assumption, we assume homogeneity of the statistical properties of the sources and information acquisition layer. 
+
+```{r forecast, echo=FALSE}
+# Create the input sliders
+inputPanel(
+  sliderInput("n_forecast", label = "Time steps",
+              min = 1, max = 100, value = 30, step = 1),
+  sliderInput("σ_forecast", label = "σ",
+              min = 0, max = 1, value = 0.1, step = 0.01),
+  sliderInput("π_forecast", label = "π",
+              min = 0.01, max = 1, value = 0.5, step = 0.01),
+  sliderInput("sμ_forecast", label = "sμ",
+              min = -1, max = 1, value = 0, step = 0.01),
+  sliderInput("sσ_forecast", label = "sσ",
+              min = 0, max = 1, value = 0, step = 0.01),
+  sliderInput("cσ_forecast", label = "cσ",
+              min = 0, max = 1, value = 0, step = 0.01),
+  sliderInput("rμ_forecast", label = "rμ",
+              min = -1, max = 1, value = 0, step = 0.01),
+  sliderInput("rσ_forecast", label = "rσ",
+              min = 0, max = 1, value = 0, step = 0.01)
+)
+
+# Generate synthetic data
+syntheticDataForecast <- reactive({
+    synthetic_data(n = input$n_forecast, sigma = input$σ_forecast)
+  })
+
+# Conduct evidence learning and transfer followed by forecasting
+forecastExample <- reactive({
+    learnedData <- learn_and_transfer(dataDF = syntheticDataForecast(), input$π_forecast,
+                       input$sμ_forecast, input$sσ_forecast,
+                       input$cσ_forecast, input$rμ_forecast,
+                       input$rσ_forecast
+    )
+    generate_forecast(learnedData)
+  })
+
+renderRbokeh ({figure(width = 300, height = 200) %>%
+  ly_lines(P, data = syntheticDataForecast(), col = '#FF9500',
+           width = 2) %>%
+    x_axis(label = 'Time step') %>%
+    y_axis(label = 'Scenario probability') %>%
+    y_range(c(0,1)) %>%
+    ly_points(forecastExample(), col = '#5856D6', size = 5)
+  })
+
+```
+
+###Allowing for multiple sources
+The model accounts for multiple sources by simply taking the median value of learned log odds associated with the same discrete evidence. This introduces at least two strong assumptions:
+
+1. That the analytic layer can match discrete evidence despite errors in transmission caused by noise and deliberate bias.
+
+2. That the analytic layer has no set means of weighting the evidence received from multiple sources. While we may be unable to determine *a priori* the analytic layer’s treatment of outliers, it is unlikely that such a treatment would -- though maybe it *should* -- simply be a sober mathematical incorporation of the data into the forecasting model. There is evidence to suggest, for instance, that intelligence agencies have assigned too much weight to outlier data in the face of political pressure [@chulov_pidd_2011].
+
+##Assessing forecasting system performance
+
+Measures of forecasting performance should allow an analyst to identify critical parameters, explain errors, and compare similar systems. In choosing a suite of measures, the intent was that each measure should provide information or insight not otherwise available.
+	
+###Assessing performance against the hidden process -- RMSE
+
+Where information about the hidden process is known to the evaluator, as in the case of synthetic data, it is possible to evaluate the forecasted probability of scenario occurrence against the true probability of scenario occurrence using the squared error. Squared errors for successive scenarios can be combined to form a system’s root mean squared error (RMSE) [@hyndman2014forecasting]. The RMSE’s principal benefit is that it offers a measure -- robust to unlikely events -- against which system performance can be evaluated. A forecast of 90% that correctly matches the 90% probability of scenario occurrence in the hidden process will not be penalized when the scenario ultimately fails to occur. Any measure that uses the hidden process, however, suffers from inherent artificiality.
+
+###Assessing performance against actual outcomes -- the Brier score
+
+The Brier score is a classic means of scoring binary predictions that is used in practice [@ungar2012good]. The Brier score captures in a single number a sense of the forecaster’s accuracy and sharpness. The Good Judgement Project [@gjo] uses the form of the Brier score given as
+
+9. $BS = \frac{1}{n}\sum\limits_{j=1}^{r}\sum\limits _{i=1}^{n}(\hat{P}_{ij}-E_{ij})^2$
+
+In Equation 9, $r$ is one of an exhaustive list of possible outcomes which, in the binary case simplifies to ${true,false}$. The forecast probabilities for single occasion $i$ are given by the vector elements $\hat{P}_{ij},\sum\limits_{j}{f_{ij}}=1$. For the binary case $\hat{P}_{ij}$ has only two elements: the forecasted probability that the event will occur, $\hat{P}_{i}$, and $1-\hat{P}_{i}$. The actual outcome, $E_{ij}$, takes the value 1 if the event occurred and 0 if it did not occur.
+
+A perfect Brier score is 0, which implies that the forecasting system assigned a probability of 1 to every scenario that occurred and 0 to every scenario that did not. The maximum -- and worst -- Brier score is 2. A Brier score of 0.5 indicates that the forecasting system is no better than one that assigned a probability of 0.5 to every scenario.
+
+###Considering unequal costs of misclassification -- ROC analysis
+
+As explained previously, probabilistic forecasting offers substantial benefits over deterministic forecasting. Assuming, however, that the forecasting process is an input into a decision or risk management model, the type of forecasting error may be important and could lead to unequal costs. For instance, consider the problem of whether Iran intends to build a nuclear weapon or desires only to construct the capability needed to pose a credible threat of doing so. It may be the case that the cost to the international community of acting based on a forecast that Iran does not desire a weapon when it fact it does is greater than the cost of acting based on a forecast that Iran does desire a weapon when it does not. The Brier score treats the problem of forecasting entirely probabilistically without providing insight into the type of error that the forecasting system returns.
+
+Following the example of the machine learning community, response operating characteristics (ROC) graphs provide a means of analyzing the type of error returned by a forecasting system [@fawcett2006introduction]. ROC graphs are constructed by sweeping across threshold values for binary probabilistic forecasts to reduce the forecasts to classifications that are elements of the set $[0,1]$. For each threshold value considered, the true positive rate (TPR) is plotted against the false positive rate (FPR). The TPR is computed as
+
+10. $TPR=\frac{TP}{TP+FN}$
+
+where $TP$ is the number of true positive results and $FN$ is the number of false negative results. The FPR is computed as
+
+11. $FPR=\frac{FP}{FP+TN}$
+
+where $FP$ is the number of false positives and $TN$ is the number of true negatives.
+
+A forecasting system that is no better than random guessing produces an ROC graph that is a straight diagonal line between $[0,0]$ and $[1,1]$. The area under the ROC curve, then, serves as a measure of the forecasting system’s trade-off between conservative results that seek to reduce false positives at the expense of true positives and aggressive results that seek to capture true positives while allowing relatively more false positive results. A perfect system would have an area under the curve of 1.0, a system no better than guessing would have an area of 0.5, and a degenerate system that is worse than random guessing would produce an area less than 0.5.
+
+##Systematic experimentation and results
+
+###Exploring impacts of volatility in the hidden process, the probability of learning evidence, and source noise on the performance of the forecasting system
+
+The first experiment with the model conducts parameter sweeps along $\sigma$ for the hidden process, $\sigma$ associated with the source’s learning and $\pi$ to answer three questions:
+
+1. Does the proposed forecasting system perform better or worse under volatile -- in the marginal log-odds sense -- hidden processes?
+
+2. Do returns to increased sampling increase or diminish under marginal log odds volatility?
+
+3. Are any benefits that accrue to the system as a result of increased sampling significantly impaired if the source’s learning is noisy?
+
+####Implementation
+
+The experiment was conducted using the R script `experiment_1.R`. Values of $\sigma$ ranging from 0.1 to 1 in steps of 0.1 were considered. The script uses a vectorized call to the function `multiple_synthetic` to generate a list of 500 realizations of the hidden process each consisting of 100 discrete bits of evidence for each value of $\sigma$ associated with the hidden process. The number of realizations was selected after convergence testing suggested that fewer than 500 realizations produced unstable results. The script then looped through values of $\pi$ ranging from 0.1 to 1 in steps of 0.1 to simulate noiseless learning of the evidence and to compute performance measures for the system. The procedure was repeated for values of $\sigma$ associated with the source.
+
+The following diagram demonstrates the network architecture implemented in this experiment. The single source to single acquirer model was chosen to remove network-induced effects.
+
+```{r, echo=FALSE}
+suppressMessages(require(visNetwork))
+
+nodes2 <- data.frame(id = 1:4, level = c(4, 3, 2, 1),
+                    label = c('Hidden process - σ varies', 'Source', "Acqurier", "Analysis"), group = c('A', 'B', 'C', 'D'))
+edges2 <- data.frame(from = c(1, 2, 3), to = c(2, 3, 4),
+                    label = c('π varies, σ varies', 'μ = 0, σ = 0', 'μ = 0, σ = 0'))
+
+renderVisNetwork({
+    visNetwork(nodes2, edges2) %>%
+    visEdges(arrows = 'to') %>%
+    visGroups(groupname = 'A', color = '#5AC8FA') %>%
+    visGroups(groupname = 'B', color = '#007AFF') %>%
+    visGroups(groupname = 'C', color = '#5856D6') %>%
+    visHierarchicalLayout()
+  })
+```
+
+####Results
+
+The results of this multivariate parameter sweep are presented in the chart below. The data are disaggregated by the $\pi$ with darker colors indicating higher values. The data may be filtered on the value of $\sigma$ associated with the source. Three measures of forecasting performance -- Brier scores, root mean squared errors, and areas under the ROC curve (AUC) -- are available for review.
+
+```{r, echo=FALSE}
+# Load the reshape2 package; we need its melt function
+suppressMessages(require(reshape2))
+
+# Load the data
+load('experiment_1_data')
+
+# Convert the matrices to data frames suitable for plotting with rbokeh.
+experiment_1_melted <- melt(experiment_1_data)
+names(experiment_1_melted) <- c('σ', 'π', 'score', 'measure', 'σsource')
+
+# Scale the data
+experiment_1_melted$σ <- experiment_1_melted$σ / 10
+experiment_1_melted$π <- experiment_1_melted$π / 10
+experiment_1_melted$σsource <- (experiment_1_melted$σsource - 1) / 10
+
+# Subset the data by the selected measure
+measureFrame <- reactive({
+  subset(experiment_1_melted, (σsource == input$sσ1) & (measure == input$measure))
+})
+
+# Plot the data demonstrating the effect of noise in the hidden process on 
+# forecasting accuracy
+renderRbokeh ({figure(width = 300, height = 200) %>%
+  ly_lines(x = σ, y = score, data = measureFrame(),
+           color = π, width = 2, legend = FALSE) %>%
+    x_axis(label = 'Hidden process σ') %>%
+    y_axis(label = input$measure) %>%
+    y_range(c(0, 1)) %>%
+    ly_points(x = σ, y = score, data = measureFrame(),
+              alpha = 0, hover = "π = @π")
+})
+
+# Add the input dropdown menu
+inputPanel(
+  selectInput("measure", label = "Measure",
+    choices = list("Brier" = "Brier", "RMSE" = "RMSE", "Area under ROC" = "AUC"), 
+    selected = "Brier"),
+  sliderInput("sσ1", label = "Source σ",
+              min = 0, max = 1, value = 0, step = 0.1)
+)
+```
+
+The sweeps yield a number of interesting conclusions. Chief among these:
+
+1. The effect of noise in the hidden process on the performance of the forecasting system varies with the source’s sampling probability at low levels of noise associated with the source. This effect attenuates as the source’s learning becomes increasingly noisy. To view this effect, sweep along the value of $\sigma$ associated with the source from 0 to 1 for any measure of performance. Note that the dispersion between lines representing constant values of $\pi$ decreases substantially. This implies, somewhat intuitively, that there are diminishing returns from increased sampling from noisy sources.
+
+2. System performance improves with increased sampling for sources that learn evidence with little noise. To observe this, consider the relative dispersion of the constant $\pi$ lines for any measure at low values of the $\sigma$ associated with the source’s learning.
+
+3. With a noiseless source, Brier scores associated with high sampling probabilities improve with the volatility of the hidden process. It is likely that this effect stems from the tendency of high volatility hidden processes to be dominated by a handful of extreme values. Finding these values through intensive accurate evidence sampling yields exceptionally favorable Brier scores. It may be helpful to consider a representative histogram of the probabilities associated with 1,000 scenarios consisting each of 100 items of evidence generated using $\sigma=1$. The vast majority of scenarios are extremely likely either to occur or not to occur. Such scenarios typically result in very favorable (low) Brier scores.
+
+```{r, echo=FALSE}
+### An exploration of why Brier scores decrease with volitility for high
+### sampling probabilities with noiseless sources while RMSE increases
+
+# Load the model's functions
+source('helper_functions.R')
+
+# Set the random seed to make sure that subsequent runs always produce the same histogram
+set.seed(187)
+
+# Generate synthetic high volitility data
+syntheticData <- multiple_synthetic(1000, 100, 1)
+
+# Create a vector of the final probabilities
+finalProbability <- sapply(syntheticData, function(x) x$P[100])
+
+renderRbokeh ({figure(width = 300, height = 200) %>%
+  ly_hist(finalProbability, breaks = 50, freq = FALSE, col = rgb(31/255, 123/255, 53/255)) %>%
+    ly_density(finalProbability) %>%
+    x_range(c(0,1)) %>%
+    x_axis(label = 'Probability of scenario occurrence')
+})
+```
+
+
+4. But, under the same conditions described above, RMSE increases with the volatility of the hidden process. We arrive, then, at a counterintuitive result: that Brier scores can indicate increasing system performance while RMSE indicates decreasing performance. This result emerges from the non-linearity associated with determining if a scenario occurred through comparison with a uniformly distributed random variable. Consider a high probability scenario that occurs. If the forecast of the scenario’s probability of occurrence were 0.8, the Brier score would be 0.08, a very favorable score. Consider now a scenario whose probability of occurrence is 0.5. If the final forecast is 0.5, the Brier score associated with this forecast will be 0.5, no better than random guessing. The RMSE, however, will be a perfect 0. This result demonstrates how the Brier score can mask truly excellent forecasting system performance for scenarios that have probabilities close to 0.5.
+
+###Exploring the impact of a single biased source among a number of honest sources on system performance
+
+We would like to explore the sensitivity of the model to the presence of a single source that desires to influence the outcome of the forecasting model by communicating evidence with $\mu\neq0$. Specific questions considered in this experiment include:
+
+1. What is the model’s overall sensitivity to biased communication associated with a single source?
+
+2. How is forecast accuracy impacted by the probability that a biased source will learn and communicate biased evidence?
+
+3. Can we attenuate out any negative influence from a biased source by adding additional unbiased sources?
+
+####Implementation
+The experiment was conducted using the R script `experiment_2.R`. The script and the functions it calls from the file `helper_functions.R` implement a network architecture consisting of one dishonest ($\mu\neq0$) source and between one and nine honest ($\mu=0$) sources reporting evidence to a single acquirer as depicted below.
+
+
+```{r, echo=FALSE}
+suppressMessages(require(visNetwork))
+
+
+nodes1 <- data.frame(id = 1:12, level = c(4, rep(3,9), 2, 1),
+                    label = c('Hidden process', rep('π = 0.1, σ', 8), 'π = 0.1, σ = 0', '', ''),
+                    group = c('D', rep('A', 8), 'Z', 'B', 'C'))
+edges1 <- data.frame(from = c(rep(1,9), 2:11), to = c(2:10, rep(11, 9), 12),
+                    label = c(rep('', 17), 'μ, σ = 0', ''))
+
+renderVisNetwork({
+    visNetwork(nodes1, edges1) %>%
+    visEdges(arrows = 'to') %>%
+    visGroups(groupname = 'A', color = '#5AC8FA') %>%
+    visGroups(groupname = 'B', color = '#007AFF') %>%
+    visGroups(groupname = 'C', color = '#5856D6') %>%
+    visGroups(groupname = 'Z', color = '#FF3B30') %>%
+    visHierarchicalLayout()
+  })
+```
+
+Honest source $i$ report noiselessly but learns with $\sigma_i$ uniformly distributed between 0.05 and 0.3. The same honest source learns evidence with probability $\pi_i$ also uniformly distributed between 0.05 and 0.3. The limits on $\sigma_i$ and $\pi_i$ associated with a typical honest source were chosen based on reasoned estimates rather than data. The dishonest source communicates evidence with $\sigma_{dishonest}=0$ and $\mu_{dishonest}$ ranging between 0.1 and 1 in increments of 0.1. The dishonest source learns evidence with probability $\pi_{dishonest}$ ranging between 0.1 and 0.3 in increments of 0.1. The code generated 500 synthetic data sets and associated forecasts for each unique value of $\pi_{dishonest}$, $\mu_{dishonest}$, and $n$ where $n$ was the number of honest sources. The synthetic data were generated using values of $\sigma$ uniformly distributed between 0.1 and 1.
+
+Note that the model is designed such that dishonest sources apply an offset to true evidence rather than simply creating evidence. This is intended to capture the notion that lies typically contain a kernel of the truth. The form of dishonesty treated by this model is more accurately described as *exaggeration* than *lying* inasmuch as the source attempts to exert information control through less than complete distortion of a known fact [@turner1975information].
+
+Note also that the model attempts to exclude outlier evidence by taking the median of all information collected at a given time step. However, overall sparse reporting makes it entirely likely that only one source will report evidence during a given time step. The model does not attempt to identify and exclude bad sources based on previous reporting. We might expect that a sophisticated enterprise might employ weighting of evidence based on previous performance or journalistic validation of confidential sources [@murugesan2007secure].
+
+####Results
+The interactive chart below presents the results obtained from one run of `experiment_2.R`. Similar to the previous interactive chart, the results are disaggregated by $\pi_{dishonest}$ with darker shades of green indicating higher values.
+
+```{r bad_source, echo=FALSE}
+# Load the data
+load('experiment_2_data')
+
+# Subset the data by the selected measure
+measureFrameBadSource <- reactive({
+  subset(experiment_2_data, (n == input$numberSources) & (measure == input$measure2))
+})
+
+# Plot the data demonstrating the effect of noise in the hidden process on 
+# forecasting accuracy
+renderRbokeh ({figure(width = 300, height = 200) %>%
+  ly_lines(x = μ, y = score, data = measureFrameBadSource(),
+           color = π, width = 2, legend = FALSE) %>%
+    x_axis(label = 'Dishonest source μ') %>%
+    y_axis(label = input$measure2) %>%
+    y_range(c(0, 1.5)) %>%
+    ly_points(x = μ, y = score, data = measureFrameBadSource(),
+              alpha = 0, hover = "π = @π")
+})
+
+# Add the input dropdown menu
+inputPanel(
+  selectInput("measure2", label = "Measure",
+    choices = list("Brier" = "Brier", "RMSE" = "RMSE", "Area under ROC" = "AUC"), 
+    selected = "Brier"),
+  sliderInput("numberSources", label = "Number of honest sources",
+              min = 1, max = 9, value = 0, step = 1)
+)
+```
+
+We note a few interesting results:
+
+1. Dishonest exaggeration of evidence can effectively defeat the forecasting system. The impact is mitigated somewhat by consulting additional sources, but a dishonest source that reports aggressively and -- importantly -- is believed by the acquisition layer can overcome a system consisting of nine honest sources.
+
+2. The classification value of the forecasting system improves as sources are added but never falls below 0.5. This implies that the forecasting architecture yields valuable classifiers across a wide range of parameters. Note, though, that tuning the classifier requires test and training data. The system’s classification value would thus require multiple scenarios to develop. There is, therefore, an implied assumption that the dishonest sources reports equally dishonestly across all scenarios. Assuming that the dishonest source’s salience is uniform across scenarios is a strong assumption that would require additional research to validate. 
+
+3. Marginal returns to the degree of exaggeration the dishonest source employs increase substantially with the dishonest source’s reporting rate when a relatively high number of honest sources are consulted.
+
+####Implementation
+The experiment was conducted using the R script `experiment_3.R`. The script takes data downloaded from the Iowa Electronic Markets winner take all markets for the 2008-2016 United States presidential elections and forms those data into hidden processes using the function `p_to_epsilon	` to convert probabilities implied by contract prices into discrete marginal log-odds. The script considers network architectures similar to that constructed for `experiment_2.R` but with the dishonest source removed. The script conducts forecasting against the hidden processes using network architectures consisting of up to 10 honest but noisy heterogeneous sources. The script uses the function ` learn_forecast_evaluate_single` to compute a mean Brier score and RMSE based on 1,000 forecasts generated for each combination of hidden process and number of sources. 
+
+Note that the code uses the true outcome of the general election, rather than a random draw based on the hidden process’ final probability, to compute Brier scores. Note also that each candidate -- not each election -- is treated as a discrete hidden process.
+
+###Exploring system performance against historical data
+
+The literature is silent on the existence of examples of hidden processes associated with real scenarios. Perhaps the closest proxies are processes implied by prediction markets. We would like to compare system performance against data from these markets as a validation step and to explore whether adding sources against real hidden processes yields improved forecasts.
+
+###Results
+The interactive chart below presents the results obtained from one run of `experiment_3.R`. In this instance, the results are disaggregated by hidden process (each corresponding to a presidential candidate).
+
+```{r real_data, echo=FALSE}
+# Load the data
+load('experiment_3_data')
+
+# Subset the data by the selected measure
+measureFrameRealData <- reactive({
+  experiment_3_data[experiment_3_data$Measure == input$measure3,]
+})
+
+# Plot the data
+renderRbokeh ({figure(width = 300, height = 200) %>%
+  ly_lines(x = Sources, y = Score, data = measureFrameRealData(),
+           color = Process, width = 2, legend = TRUE) %>%
+    x_axis(label = 'Number of sources') %>%
+    y_axis(label = input$measure3) %>%
+    y_range(c(0, 1.2))
+})
+
+# Add the input dropdown menu
+inputPanel(
+  selectInput("measure3", label = "Measure",
+    choices = list("Brier" = "Brier", "RMSE" = "RMSE"), 
+    selected = "Brier")
+)
+```
+
+There are three key takeaways from this experiment:
+
+1. The 2016 election caused as much trouble for the model as it did for pundits. The model performed far worse than random guessing for both Clinton and Trump. One could argue that the true hidden process was more favorable to Trump than was the hidden process implied by the IEM’s 2016 market.
+
+2. IEM contract prices sum very close to $1 in the winner-take-all markets. Even though the implied hidden processes were coherent from an economic standpoint, they produced interestingly divergent results across elections. Most strikingly, consider the forecasting performance for the 2008 election. The model did a particularly good job forecasting Senator McCain’s loss; its performance in forecasting President Obama’s win was far less impressive. Notably, the forecasts against the Obama process required six sources to perform better than random guessing whereas forecasts against the McCain process were better than guessing even when only one source was consulted.
+
+3. Related to the second point, above, the marginal returns to adding sources were clearly non-uniform across the hidden processes. All of the processes save the Obama 2008 process appear to converge smoothly to final Brier scores and values of RMSE. The Obama 2008 process appears to lie in a transitional region distinct from the others. 
+
+##Conclusion and areas for future exploration
+The proposed model performs credibly against historical presidential election data and demonstrates interesting transitional behavior as a result of computational nonlinearities. There are several ways in which to extend this research:
+
+1. *Performance*. The code is slow in some cases and requires rigorous profiling. The Rcpp package provides bindings to compiled C++ functions from R. Rewriting portions of the code in C++ will likely substantially speed execution [@wickham2014advanced].
+
+2. *Modeling communication*. The model’s use of Gaussian noise to simulate communication between actors has the benefit of parsimony but may suffer from accuracy. Additional research should be conducted into mathematical models of human communication. Where data area available, competing models should be chosen through rigorous validation.
+
+3. *Modeling more interesting architectures*. This effort concluded without considering architectures in which multiple sources report to multiple acquirers. Cases involving such networks are likely to generate emergent phenomena through nonlinear interactions between actors [@gilbert2005simulation].
+
+4. *Exploring alternative methods of validation*. Validating this model was a real challenge and required ignoring some of the questionable aspects of using prediction market data as proxies for real hidden processes. To the extent that more realistic data can be developed through experimentation, culled from more liquid prediction markets, or discovered through a more thorough review of existing research, those data should be applied to the validation process.
+
+##References
